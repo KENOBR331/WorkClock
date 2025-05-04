@@ -1,0 +1,665 @@
+<!--現状バグ
+▼追加バグ
+・解像度に合っていない（FHDにあわせてしまったため）（済）
+
+
+■時間を把握していなかったため、休憩時間、作業時間のずれが生じている
+    ・円の描画ずれ（リロード時に描画が変になる時間帯がある14:00過ぎの最後から2つ目の円）
+    ・チャイムを鳴らす時間のずれ（済）
+    上記二点が追加で発生
+
+    ・時間によるタイマーをどうしよう（済）
+        --固定配列をもたせることで解決
+    ・上記から作業時間、休憩時間、昼休みでの連動を行う関数を作成する
+        --画像、チャイムは連動済み
+        --円は上に記述済み
+■追加バグ
+・なぜか時間定義とは関係のない円が描画される（特にリロード時）
+・リロードした際、Canvasがずれることが頻発する
+
+■残り時間は表示をしてほしいとのこと
+・配列で定義したが、どこかずれが生じている（最後の時間-50分あたり？）
+-->
+
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <link rel="icon" href="image/favicon.ico"><!-- アイコンが小さすぎてデジタル時計とわかりにくい -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>作業時計</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        #currentTime {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            inset: 0;
+            font-size: clamp(30px, 10vw, 60px);
+            color: black;
+            text-shadow:
+                2px 2px 3px rgba(41, 48, 58, 0.8),
+                4px 4px 6px rgba(0, 0, 0, 0.5),
+                6px 6px 8px rgba(0, 0, 0, 0.4);
+            z-index: 10;
+        }
+        #subText {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        inset: 0;
+        font-size: clamp(20px, 5vw, 60px); /* Adjusted smaller size */
+        color: black;
+        text-shadow:
+            1px 1px 2px rgba(255, 255, 255, 0.8),
+            2px 2px 4px rgba(0, 0, 0, 0.5),
+            3px 3px 6px rgba(0, 0, 0, 0.4);
+        z-index: 9;
+        transform: translateY(120px); /* Adjusted to move subText further down */
+    }
+
+        #restTime{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            inset: 0;
+            font-size: clamp(40px, 10vw, 120px);
+            color: black;
+            text-shadow:
+                2px 2px 3px rgba(255, 255, 255, 0.8),
+                4px 4px 6px rgba(0, 0, 0, 0.5),
+                6px 6px 8px rgba(0, 0, 0, 0.4);
+            z-index: 11;
+        }
+
+        .number {
+            font-size: clamp(80px, 20vw, 240px);
+            font-weight: bold;
+        }
+
+        .small {
+            font-size: clamp(30px, 8vw, 90px);
+        }
+
+        #headerImg {
+            position: absolute;
+            max-width: 40vw; /* 1366pxなら約550px程度 */
+            max-height: 15vw; /* 高さは少し抑える */
+            z-index: 1;
+        }
+        canvas {
+            width: 90%;
+            height: auto;
+            display: block;
+            background-color: rgba(255, 255, 255, 0);
+            z-index: 99;
+            position: absolute;
+            bottom: 5vh;
+        }
+
+        #leftImage {
+            position: absolute;
+            left: 2vw; /* 少し余白をつける */
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22vw; /* 画面幅の22% */
+            height: auto;
+            max-width: 100%;
+        }
+
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            position: relative;
+            background-image: url('image/haikei.png');
+            background-size: 100% 100%;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <img id="headerImg" src="image/sagyou.png" alt="作業時間">
+        <p id="currentTime">
+            <span id="hours"></span><span class="small">時</span>
+            <span id="minutes"></span><span class="small">分</span>
+        </p>
+        <div id="subText"></div>
+
+        <canvas id="circleCanvas"></canvas>
+        <img id="leftImage" src="image/yoshi.png" />
+    </div>
+    <script>
+        /**
+         * 作成開始日:2025/02/06-2025/02/22
+         * 作成者:Ken Obara コード修正点あり
+         * 対応解像度:1920*1080（どうやら1366*768の模様・・・）
+         * 使用スクリプトバージョン:JavaScript	V8 13.3.415.19
+         * ECMAScript 2022を完全サポート
+         * 
+         * 開発環境:
+         * OS 名:Microsoft Windows 11 Pro
+         * OS バージョン:10.0.26100 N/A ビルド 26100
+         * Windows 11 Version 24H2 (Build 26100.2894)
+         * 
+         * ブラウザ:Google Chrome 133.0.6943.60 (Official Build) （64 ビット）
+         * 
+         * 以下のショートカットを使用し、起動した上で動作を確認
+         * "C:\Program Files\Google\Chrome\Application\chrome.exe" --app="http://localhost/"
+         */
+
+         //いつか外部定義にして簡単にいじれるように・・・
+         
+         /**
+          * bPre
+          * @param {boolean}
+          * true:プレミアム
+          * false:通常
+          */
+        let bPre = false;
+        /**
+         * preDayHout
+         * @param {int }
+         * プレミアムデー
+         * 基本的にトータル6時間（休憩込み）
+         */
+        const preDayHour = 6;
+
+        /**
+         * preDay
+         * @param {int}
+         * 0:月曜,1火曜,2水曜・・・5,金曜日
+         */
+        const preDay = 5;
+
+        //上部画像の定義
+        const img_A_1 = "image/junbi.png"; // 始業前
+        const img_A_2 = "image/kataduke_kokuban.png"; // 片付け時間
+        const img_A_3 = "image/otukaresama.png"; //作業終了後
+        const img_A_4 = "image/hiru.png"; //昼休憩
+        const img_A_5 = "image/sagyou.png"; //作業中
+        const img_A_6 = "image/kyuukei.png"; //休憩
+
+        //左部画像の定義
+        const img_B_1 = "image/madakana.png"; //始業前
+        const img_B_2 = "image/kataduke.png"; // 片付け時間
+        const img_B_3 = "image/otukare.png"; //作業終了後
+        const img_B_4 = "image/metabo2.png"; //昼休憩
+        const img_B_5 = "image/yoshi.png"; //作業中
+        const img_B_6 = "image/suibun.png"; //休憩
+
+
+        const canvas = document.getElementById("circleCanvas");
+        const ctx = canvas.getContext("2d");
+        const imageElement = document.getElementById("leftImage");
+
+        let circleCount = getCircleCount();
+        let circles = [];
+
+        // 音を鳴らす時間のリスト（時, 分, 秒）
+        let soundTimes;
+		const baseSoundTimes = [
+			{ hours: 9, minutes: 0, seconds: 0 },
+			{ hours: 9, minutes: 55, seconds: 0 },
+			{ hours: 10, minutes: 0, seconds: 0 },
+			{ hours: 10, minutes: 55, seconds: 0 },
+			{ hours: 11, minutes: 0, seconds: 0 },
+			{ hours: 12, minutes: 0, seconds: 0 },
+			{ hours: 12, minutes: 45, seconds: 0 },
+			{ hours: 13, minutes: 45, seconds: 0 },
+			{ hours: 13, minutes: 50, seconds: 0 },
+			{ hours: 14, minutes: 55, seconds: 0 },
+			bPre ? { hours: 15, minutes: 5, seconds: 0 } : { hours: 15, minutes: 0, seconds: 0 },
+			{ hours: 15, minutes: 55, seconds: 0 },
+			{ hours: 16, minutes: 5, seconds: 0 }
+		];
+
+		soundTimes = [...baseSoundTimes];
+
+
+        //残り時間表示用の（時, 分, 秒）※上とは違い休憩時間込
+        const baseTimeRanges = [
+                { start: [9, 0, 0], end: [9, 55, 0] },
+                { start: [9, 55, 0], end: [10, 0, 0] },
+                { start: [10, 0, 0], end: [10, 55, 0] },
+                { start: [10, 55, 0], end: [11, 0, 0] },
+                { start: [11, 0, 0], end: [12, 0, 0] },
+                { start: [12, 0, 0], end: [12, 45, 0] },
+                { start: [12, 45, 0], end: [13, 45, 0] },
+                { start: [13, 45, 0], end: [13, 50, 0] },
+                { start: [13, 50, 0], end: [14, 55, 0] },
+            ];
+
+            const timeRanges = bPre ? baseTimeRanges : [
+                ...baseTimeRanges,
+                { start: [14, 55, 0], end: [15, 0, 0] },
+                { start: [15, 0, 0], end: [16, 5, 0] }
+            ];
+
+
+        
+		// 画面リサイズ時に再計算を行う
+		window.addEventListener("resize", adjustHeaderPosition);
+        // 表示時に画面に適切な配置を計算する
+		window.addEventListener("load", adjustHeaderPosition);
+
+        /**
+         * プライムフライデーかどうかのチェック
+         * 
+         * @return int 円の数7または6(通常日:7,プライムフライデー:6)
+         */
+        function getCircleCount() {
+            const now = new Date();
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            if(preDay === now.getDay()&& now.getDate() === lastDay.getDate()){
+                bPre = true;//プレミアムデー
+                return preDayHour;
+            }else{
+                bPre = false;//通常時
+                return preDayHour + 1;
+            }
+        }
+
+        /**
+         * 円の数を取得
+         *
+         * @return void
+         */
+        function initializeCircles() {
+            circles = [];
+            for (let i = 0; i < circleCount; i++) {
+                circles.push({
+                    x: 0, 
+                    y: 0,
+                    radius: 0,
+                    currentAngle: Math.PI * 2,
+                    lastAngle: Math.PI * 2,
+                    isVisible: true,
+                    isGray: i === 3,
+                    isWarmColor: i >= 4
+                });
+            }
+        }
+
+
+
+		
+
+        function updateCirclesBasedOnTime() {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+
+
+
+            let currentTotalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+			//以下スパゲティしてる
+            for (let i = 0; i < circleCount; i++) {
+                let timeForCircle = (i + 9) * 3600;
+                let duration = 0;
+                if(bPre == true && i === 6){duration = 65 * 60;} //プレミアムデーのときは6つめが65分
+
+				if (i === 0) duration = 55 * 60;
+				if (i === 1) duration = 55 * 60;
+                if (i === 2) duration = 60 * 60;
+                if (i === 3) duration = 45 * 60;
+                if (i === 4) duration = 60 * 60;
+				if (i === 5) duration = 65 * 60;
+                if (i === 6) duration = 65 * 60;
+                
+                if (i === 0 && (hours === 9 && minutes >= 0 || hours === 9 && minutes < 55)) {
+                    let startTime = 9 * 3600;
+                    let duration = 55 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                }else if (i === 1 && (hours === 10 && minutes >= 0 || hours === 10 && minutes < 55)) {
+                    let startTime = 10 * 3600;
+                    let duration = 55 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                } else if (i === 2 && (hours === 11 && minutes >= 0 || hours === 12 && minutes < 0)) {
+                    let startTime = 11 * 3600;
+                    let duration = 60 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                }else if (i === 3 && (hours === 12 && minutes >= 0 || hours === 12 && minutes < 45)) {
+                    let startTime = 12 * 3600;
+                    let duration = 45 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                }else if (i === 4 && (hours === 12 && minutes >= 45 || hours === 13 && minutes < 45)) {
+                    let startTime = 12 * 3600 + 45 * 60;
+                    let duration = 60 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                } else if (i === 5 && (hours === 13 && minutes >= 50 || hours === 14 && minutes < 55)) {
+                    let startTime = 13 * 3600 + 50 * 60;
+                    let duration = 65 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                } else if (i === 6 && (hours === 15 && minutes >= 0 || hours === 16 && minutes < 5)) {
+                    let startTime = 15 * 3600;
+                    let duration = 65 * 60;
+                    let endTime = startTime + duration;
+					
+					circles[i].currentAngle = currentTotalSeconds < endTime
+						? Math.PI * 2 - ((currentTotalSeconds - startTime) / duration) * Math.PI * 2
+						: 0;
+                } else{
+                    // 通常の円の削減処理
+                    circles[i].currentAngle = currentTotalSeconds < timeForCircle + duration
+                        ? Math.PI * 2 - ((currentTotalSeconds - timeForCircle) / duration) * Math.PI * 2
+                        : 0;
+                }
+				
+				//うまくいかないので強制停止をすることにした・・・/(´・ω・｀)/なんでや？
+				//どうしても表示されてしまうので、力技
+				if(!bPre){
+					if (i === 4 && ((hours === 13 && minutes >= 45) && (hours === 13 && minutes <= 50))) {
+						circles[i].currentAngle = 0;
+					}
+                }else{
+					if (i === 4 && ((hours === 13 && minutes >= 45) && (hours === 13 && minutes <= 50))) {
+						circles[i].currentAngle = 0;
+					}
+				}				
+				//そのくせなぜかこっちは表示されてしまう・・・/(´・ω・｀)/なんでなん
+                //if (i === 5 && ((hours === 14 && minutes >= 55) && (hours === 15 && minutes <= 0))) {
+                //    circles[i].currentAngle = 0;
+                //}
+				if (i === 5&& ((hours === 14 && minutes >= 55))){circles[i].currentAngle = 0;}
+				//なんかわからんけど13:50超えたら逆の円が描画される
+				//苦戦中・・・2/6着手-2/16完成～ずっとここの原因不明 /(´・ω・｀)/なんでやねん
+				if (i === 5&& ((hours === 13 && minutes >= 50))){circles[i-1].currentAngle = 0;}
+				if(!bPre){
+					if (i === 5&& ((hours === 15 && minutes <= 5))){circles[i].currentAngle = 0;}
+					circles[i].isVisible = currentTotalSeconds < timeForCircle + duration;
+				}else{
+					if (i === 5&& ((hours === 15 && minutes <= 5))){circles[i].currentAngle = 0;}
+					circles[i].isVisible = currentTotalSeconds < timeForCircle + duration;
+				}
+                
+				
+					
+            }
+
+            
+			// 上部画像
+			const headerElement = document.getElementById("headerImg");
+
+			// 下部画像
+			const imageElement = document.getElementById("leftImage");
+
+			// 現在時刻を分単位で取得
+			const totalMinutes = hours * 60 + minutes;
+
+			// 画像を取得する共通関数
+			function getImageSrc(type) {
+				const imgMap = {
+					A: [img_A_1, img_A_2, img_A_3, img_A_4, img_A_5, img_A_6],
+					B: [img_B_1, img_B_2, img_B_3, img_B_4, img_B_5, img_B_6]
+				};
+
+				const img = imgMap[type];
+
+				if (totalMinutes < 9 * 60) return img[0]; // 早朝
+
+				if (bPre == true) {
+					if (totalMinutes >= 14 * 60 + 55) return img[2]; // 業務終了後
+					if (totalMinutes >= 14 * 60 + 45) return img[1]; // 片付け時間
+				}
+
+				if (totalMinutes >= 16 * 60 + 5) return img[2]; // 業務終了後
+				if (totalMinutes >= 15 * 60 + 55 && totalMinutes < 16 * 60 + 5) return img[1]; // 片付け
+				if (totalMinutes >= 15 * 60 && totalMinutes < 15 * 60 + 55) return img[4]; // 作業
+				if (totalMinutes >= 14 * 60 + 55 && totalMinutes < 15 * 60) return img[5]; // 休憩
+				if (totalMinutes >= 13 * 60 + 50 && totalMinutes < 14 * 60 + 55) return img[4]; // 作業
+				if (totalMinutes >= 13 * 60 + 45 && totalMinutes < 13 * 60 + 50) return img[5]; // 休憩
+				if (totalMinutes >= 12 * 60 + 45 && totalMinutes <= 13 * 60 + 45) return img[4]; // 作業
+				if (totalMinutes >= 12 * 60 && totalMinutes < 12 * 60 + 45) return img[3]; // 昼休み
+				if (hours === 11) return img[4]; // 11:00 - 11:59
+				if (minutes >= 55) return img[5]; // 休憩
+
+				return img[4]; // 通常時
+			}
+
+			// 画像を変更
+			headerElement.src = getImageSrc("A");
+			imageElement.src = getImageSrc("B");
+
+            drawCircles();   
+        }
+
+        /**
+         * リロードされた際、円の再描画を行う
+         *
+         * @return void
+         */
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * 0.9;
+            const circleRadius = canvas.width / (circleCount * 2.5);
+            const spacing = circleRadius * 0.1;
+            canvas.height = circleRadius * 2 + 20;
+
+            const totalWidth = circleRadius * 2 * circleCount + spacing * (circleCount - 1);
+            const startX = (canvas.width - totalWidth) / 2;
+            const startY = canvas.height / 2;
+
+            circles.forEach((circle, i) => {
+                circle.x = startX + (circleRadius * 2 + spacing) * i + circleRadius;
+                circle.y = startY;
+                circle.radius = circleRadius;
+            });
+
+            drawCircles();
+        }
+
+        /**
+         * 下部に表示される円を描画
+         * 左3つは青みがかったカラー（午前を示す色合い）
+         * 左から4つ目（休憩時間はグレー）
+         * 右の残りは温かみのあるオレンジ色（午後を示す色合い）
+         * @return void
+         */
+        function drawCircles() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            circles.forEach(circle => {
+                ctx.beginPath();
+                ctx.arc(circle.x, circle.y, circle.radius, -Math.PI / 2, -Math.PI / 2 - circle.currentAngle, true);
+                ctx.lineTo(circle.x, circle.y);
+
+                const gradient = ctx.createRadialGradient(circle.x, circle.y, 0, circle.x, circle.y, circle.radius);
+                gradient.addColorStop(0, circle.isGray ? "#bbbbbb" : (circle.isWarmColor ? "#f3a68c" : "#ADD8E6"));
+                gradient.addColorStop(1, circle.isGray ? "#888888" : (circle.isWarmColor ? "#d87c5c" : "#4682B4"));
+                
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            });
+        }
+
+        updateTime();
+        /**
+         * 現在時刻を秒単位で監視し、時計を表示する
+         * 文字はレスポンシブに対応し、ある程度の可変サイズにまで対応（CSS）
+         * @return void
+         */
+        function updateTime() {
+            const now = new Date(); //ここの値をベースとしているため、最初に演算を行う
+            let hours = now.getHours();
+            let minutes = now.getMinutes();
+            const hoursElement = document.getElementById("hours");
+            const minutesElement = document.getElementById("minutes");
+            
+            hours = String(hours).padStart(2, '0');
+            minutes = String(minutes).padStart(2, '0');
+            hoursElement.textContent = hours;
+            minutesElement.textContent = minutes;
+
+            hoursElement.style.fontSize = "clamp(80px, 20vw, 200px)";
+            minutesElement.style.fontSize = "clamp(80px, 20vw, 200px)";
+            hoursElement.style.fontWeight = "bold";
+            minutesElement.style.fontWeight = "bold";
+        }
+
+        /**
+         * 常時イベントを監視
+         * リサイズイベントを取得した際、現在時刻の表示サイズを再描画する
+         */
+        window.addEventListener("resize", () => {
+            document.getElementById("currentTime").style.fontSize = "clamp(40px, 10vw, 120px)";
+        });
+
+
+
+
+        /**
+         * ヘッダーイメージと時間をレスポンシブ表示するため、演算をする（CSS）
+         *
+         * @return void
+         */
+        function adjustHeaderPosition() {
+			const header = document.getElementById("headerImg");
+			const time = document.getElementById("currentTime");
+			const timeRect = time.getBoundingClientRect();
+			
+            const margin = 20;
+
+            header.style.top = `${Math.max(timeRect.top - header.clientHeight - margin, 10)}px`;
+            header.style.left = "50%";
+            header.style.transform = "translateX(-50%)";
+		}
+
+
+        window.onload = function () {
+            initializeCircles();
+            resizeCanvas();
+            updateCirclesBasedOnTime(1000);
+            setInterval(updateCirclesBasedOnTime, 1000);
+            setInterval(updateTime, 1000);
+            enterFullScreen();
+        };
+
+        // 現在の時間と一致するか判定
+        function shouldPlaySound(hours, minutes, seconds) {
+            return soundTimes.some(time =>
+                time.hours === hours && time.minutes === minutes && time.seconds === seconds
+            );
+        }
+
+        /**
+         * 音を再生
+         * @return void
+         */
+        function soundPlay() {
+			const audio = new Audio("sound/chime.wav");
+            audio.play();
+        }
+
+        /**
+         * 1秒単位でシステム時刻を取得し、時間になったらチャイムを鳴らす
+         * @return void
+         */
+        function checkTime() {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+
+            if (shouldPlaySound(hours, minutes, seconds)) {
+                soundPlay();
+            }
+        }
+        // 1秒ごとに時間をチェック
+        setInterval(checkTime, 1000);
+		// 画面リサイズ時に再計算
+		window.addEventListener("resize", adjustHeaderPosition);
+		window.addEventListener("load", adjustHeaderPosition);
+
+        //残り時間-----------------------------------------------------
+        const subText = document.getElementById("subText");
+        function updateSubText() {
+            subText.innerText = getRemainingTime();
+        }
+
+        setInterval(updateSubText, 1000);
+
+
+        /**
+         *  残り時間算出、表示
+         * 
+         */
+         function getRemainingTime() {
+
+            const now = new Date();
+            const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+
+            const currentRange = timeRanges.find(({ start, end }) => {
+                const startSeconds = start[0] * 3600 + start[1] * 60 + start[2];
+                const endSeconds = end[0] * 3600 + end[1] * 60 + end[2];
+                return currentSeconds >= startSeconds && currentSeconds < endSeconds;
+            });
+
+            if (!currentRange) return "";
+
+            const endSeconds = currentRange.end[0] * 3600 + currentRange.end[1] * 60 + currentRange.end[2];
+            const remainingSeconds = endSeconds - currentSeconds;
+
+            const remainingMinutes = Math.floor(remainingSeconds / 60);
+            const remainingSecs = remainingSeconds % 60;
+
+            if(remainingMinutes > 0){
+                return `残り: ${remainingMinutes} 分 `;
+            }else{
+                return `残り: ${remainingSecs} 秒 `;
+            }
+
+        }
+
+        function enterFullScreen() {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.mozRequestFullScreen) {
+                elem.mozRequestFullScreen();
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) {
+                elem.msRequestFullscreen();
+            }
+        }
+//window.open('http://localhost/', '_blank', 'toolbar=no,location=no,status=no,menubar=no,scrollbars=no,resizable=no');
+    </script>
+</body>
+</html>

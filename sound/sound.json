@@ -1,0 +1,34 @@
+{
+    "times": [
+        "09:00",
+        "09:55",
+        "10:00",
+        "10:55",
+        "11:00",
+        "12:00",
+        "12:40",
+        "12:45",
+        "13:45",
+        "13:50",
+        "14:55",
+        "15:55",
+        "16:00",
+        "16:05"
+    ],
+    "fileNames": [
+        "chime_start1.wav",
+        "chime_end1.wav",
+        "chime_start2.wav",
+        "chime_end2.wav",
+        "chime_start3.wav",
+        "chime_end3.wav",
+        "chime_start4.wav",
+        "chime_end4.wav",
+        "chime_start5.wav",
+        "chime_end5.wav",
+        "chime_start6.wav",
+        "chime_end6.wav",
+        "chime_start7.wav",
+        "chime_end7.wav"
+    ]
+}
